@@ -126,11 +126,30 @@ def escape_tsv(text: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="pdf into text+font info tsv")
     parser.add_argument("pdfs", nargs="+", type=Path, metavar="PDF")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="count",
+        default=0,
+        help="-v for INFO, -vv for DEBUG",
+    )
     return parser
 
 
 def main():
     args = build_parser().parse_args()
+    # --verbose でログのレベル変更
+    log_level = {
+        0: logging.WARNING,
+        1: logging.INFO,
+    }.get(args.verbose, logging.DEBUG)  # list に safe-get がないから……
+
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(levelname)s: %(message)s",
+    )
+    logging.getLogger(__package__).setLevel(log_level)
+
     for f in args.pdfs:
         tsv_data = generate_font_info(f)
         result_file = f.with_suffix(f.suffix + ".font-info.tsv")
