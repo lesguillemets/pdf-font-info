@@ -1,6 +1,6 @@
 [project]
 name = "pdf-font-info"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pdf-font-info = "pdf_font_info:main"
+pdf-font-info = "pdf_font_info.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]

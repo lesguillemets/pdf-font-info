@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def generate_font_info(f: Path) -> str:
     if not (f.is_file()):
         raise ValueError(f"Not a file: {f}")
-    results = [SpanInfo.gen_csv_header()]
+    results = [SpanInfo.gen_tsv_header()]
     with pymupdf.open(f) as doc:
         for page in doc.pages():  # TODO: specify page range from command line argument
             logger.info(f"processing {page.number}")
@@ -21,7 +21,7 @@ def generate_font_info(f: Path) -> str:
                 for line in block["lines"]:
                     for span in line["spans"]:
                         span_info = SpanInfo.from_span(span, page_index=page.number)
-                        results.append(span_info.gen_csv_line())
+                        results.append(span_info.gen_tsv_line())
 
             logger.info(f"processed {page.number}")
     return "\n".join(results)
@@ -36,7 +36,7 @@ class SpanInfo:
     page: int  # 1-indexed
     font: str
     size: float
-    color: int | float | str  # not sure
+    color: int
     flag_code: int
     flags: str
     x0: float
@@ -46,16 +46,16 @@ class SpanInfo:
     text: str
 
     @staticmethod
-    def gen_csv_header() -> str:
+    def gen_tsv_header() -> str:
         return "\t".join(f.name for f in fields(SpanInfo))
 
-    def gen_csv_line(self):
+    def gen_tsv_line(self) -> str:
         return "\t".join(
             [
                 str(self.page),
                 self.font,
                 f"{self.size:.2f}",
-                str(self.color),
+                f"#{self.color:06x}",
                 str(self.flag_code),
                 self.flags,
                 f"{self.x0:.2f}",
@@ -151,12 +151,13 @@ def main():
     logging.getLogger(__package__).setLevel(log_level)
 
     for f in args.pdfs:
-        tsv_data = generate_font_info(f)
         result_file = f.with_suffix(f.suffix + ".font-info.tsv")
-        if result_file.exists():
+        if result_file.exists():  # ファイルがあったら上書きはやめておく
+            # todo: 大サービスで比較する？
             logger.error(f"not overriding {result_file} in processing {f}: skipping")
             continue
         else:
+            tsv_data = generate_font_info(f)
             logger.info(f"writing to {result_file}")
             with result_file.open("w") as resultwriter:
                 resultwriter.write(tsv_data)
