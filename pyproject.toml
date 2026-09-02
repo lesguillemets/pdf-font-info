@@ -1,0 +1,25 @@
+[project]
+name = "pdf-font-info"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "lesguillemets", email = "kgkacko+github@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pymupdf>=1.28.2",
+]
+
+[project.scripts]
+pdf-font-info = "pdf_font_info:main"
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.16.4",
+]
