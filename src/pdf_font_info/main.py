@@ -151,12 +151,13 @@ def main():
     logging.getLogger(__package__).setLevel(log_level)
 
     for f in args.pdfs:
-        tsv_data = generate_font_info(f)
         result_file = f.with_suffix(f.suffix + ".font-info.tsv")
-        if result_file.exists():
+        if result_file.exists():  # ファイルがあったら上書きはやめておく
+            # todo: 大サービスで比較する？
             logger.error(f"not overriding {result_file} in processing {f}: skipping")
             continue
         else:
+            tsv_data = generate_font_info(f)
             logger.info(f"writing to {result_file}")
             with result_file.open("w") as resultwriter:
                 resultwriter.write(tsv_data)
