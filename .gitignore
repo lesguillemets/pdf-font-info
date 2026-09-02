@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# to prevent unintentional commits
+*.pdf
