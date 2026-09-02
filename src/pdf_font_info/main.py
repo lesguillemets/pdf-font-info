@@ -36,7 +36,7 @@ class SpanInfo:
     page: int  # 1-indexed
     font: str
     size: float
-    color: str
+    color: int | float | str  # not sure
     flag_code: int
     flags: str
     x0: float
@@ -55,7 +55,7 @@ class SpanInfo:
                 str(self.page),
                 self.font,
                 f"{self.size:.2f}",
-                self.color,
+                str(self.color),
                 str(self.flag_code),
                 self.flags,
                 f"{self.x0:.2f}",
