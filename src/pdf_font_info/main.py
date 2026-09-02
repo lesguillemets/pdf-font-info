@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def generate_font_info(f: Path) -> str:
     if not (f.is_file()):
         raise ValueError(f"Not a file: {f}")
-    results = [SpanInfo.gen_csv_header()]
+    results = [SpanInfo.gen_tsv_header()]
     with pymupdf.open(f) as doc:
         for page in doc.pages():  # TODO: specify page range from command line argument
             logger.info(f"processing {page.number}")
@@ -21,7 +21,7 @@ def generate_font_info(f: Path) -> str:
                 for line in block["lines"]:
                     for span in line["spans"]:
                         span_info = SpanInfo.from_span(span, page_index=page.number)
-                        results.append(span_info.gen_csv_line())
+                        results.append(span_info.gen_tsv_line())
 
             logger.info(f"processed {page.number}")
     return "\n".join(results)
@@ -46,10 +46,10 @@ class SpanInfo:
     text: str
 
     @staticmethod
-    def gen_csv_header() -> str:
+    def gen_tsv_header() -> str:
         return "\t".join(f.name for f in fields(SpanInfo))
 
-    def gen_csv_line(self) -> str:
+    def gen_tsv_line(self) -> str:
         return "\t".join(
             [
                 str(self.page),
