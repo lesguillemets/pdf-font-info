@@ -141,3 +141,4 @@ def main():
             logger.info(f"writing to {result_file}")
             with result_file.open("w") as resultwriter:
                 resultwriter.write(tsv_data)
+            logger.info(f"successfully written to {result_file}")
