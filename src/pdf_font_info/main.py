@@ -49,7 +49,7 @@ class SpanInfo:
     def gen_csv_header() -> str:
         return "\t".join(f.name for f in fields(SpanInfo))
 
-    def gen_csv_line(self):
+    def gen_csv_line(self) -> str:
         return "\t".join(
             [
                 str(self.page),
