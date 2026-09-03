@@ -1,126 +1,67 @@
 import argparse
 import logging
-from dataclasses import dataclass, fields
 from pathlib import Path
 
 import pymupdf
 
+from .annotate import AnnotationOptions, annotate_document
+from .palette import DEFAULT_PALETTE, palette_names, parse_palette
+from .spans import extract_spans, gen_tsv
+
 logger = logging.getLogger(__name__)
+
+TSV_SUFFIX = ".font-info.tsv"
+ANNOTATED_SUFFIX = ".font-annotated.pdf"
 
 
 def generate_font_info(f: Path) -> str:
-    if not (f.is_file()):
+    """
+    後方互換のために残してある: PDF から TSV の中身を作って返す。
+    """
+    if not f.is_file():
         raise ValueError(f"Not a file: {f}")
-    results = [SpanInfo.gen_tsv_header()]
     with pymupdf.open(f) as doc:
-        for page in doc.pages():  # TODO: specify page range from command line argument
-            logger.info(f"processing {page.number}")
-            # https://pymupdf.readthedocs.io/en/latest/recipes-text.html#how-to-analyze-font-characteristics
-            blocks = page.get_text("dict", flags=11)["blocks"]
-            for block in blocks:
-                for line in block["lines"]:
-                    for span in line["spans"]:
-                        span_info = SpanInfo.from_span(span, page_index=page.number)
-                        results.append(span_info.gen_tsv_line())
-
-            logger.info(f"processed {page.number}")
-    return "\n".join(results)
+        return gen_tsv(extract_spans(doc))
 
 
-@dataclass
-class SpanInfo:
-    """
-    ある span の情報をまとめたやつ
-    """
+def process(
+    f: Path,
+    *,
+    want_tsv: bool,
+    want_annotation: bool,
+    annotation_options: AnnotationOptions,
+) -> None:
+    if not f.is_file():
+        raise ValueError(f"Not a file: {f}")
 
-    page: int  # 1-indexed
-    font: str
-    size: float
-    color: int
-    flag_code: int
-    flags: str
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-    text: str
+    tsv_file = f.with_suffix(f.suffix + TSV_SUFFIX)
+    annotated_file = f.with_suffix(f.suffix + ANNOTATED_SUFFIX)
 
-    @staticmethod
-    def gen_tsv_header() -> str:
-        return "\t".join(f.name for f in fields(SpanInfo))
+    # ファイルがあったら上書きはやめておく
+    # todo: 大サービスで比較する？
+    if want_tsv and tsv_file.exists():
+        logger.error(f"not overriding {tsv_file} in processing {f}: skipping")
+        want_tsv = False
+    if want_annotation and annotated_file.exists():
+        logger.error(f"not overriding {annotated_file} in processing {f}: skipping")
+        want_annotation = False
+    if not (want_tsv or want_annotation):
+        return
 
-    def gen_tsv_line(self) -> str:
-        return "\t".join(
-            [
-                str(self.page),
-                self.font,
-                f"{self.size:.2f}",
-                f"#{self.color:06x}",
-                str(self.flag_code),
-                self.flags,
-                f"{self.x0:.2f}",
-                f"{self.y0:.2f}",
-                f"{self.x1:.2f}",
-                f"{self.y1:.2f}",
-                self.text,
-            ]
-        )
+    with pymupdf.open(f) as doc:
+        spans = extract_spans(doc)
 
-    @staticmethod
-    def from_span(span, page_index: int) -> SpanInfo:
-        """
-        page_index は 0-indexed
-        """
+        if want_tsv:
+            logger.info(f"writing to {tsv_file}")
+            with tsv_file.open("w") as resultwriter:
+                resultwriter.write(gen_tsv(spans))
+            logger.info(f"successfully written to {tsv_file}")
 
-        x0, y0, x1, y1 = span["bbox"]
-        return SpanInfo(
-            page=page_index + 1,
-            font=span["font"],
-            size=span["size"],
-            color=span["color"],
-            flag_code=span["flags"],
-            flags=flags_decomposer(span["flags"]),
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            text=escape_tsv(span["text"]),
-        )
-
-
-def flags_decomposer(flags: int) -> str:
-    """
-    Make font flags human readable. from the doc:
-    https://pymupdf.readthedocs.io/en/latest/recipes-text.html#how-to-analyze-font-characteristics
-    """
-    l = []
-
-    if flags & pymupdf.TEXT_FONT_SUPERSCRIPT:
-        l.append("superscript")
-    if flags & pymupdf.TEXT_FONT_ITALIC:
-        l.append("italic")
-    if flags & pymupdf.TEXT_FONT_SERIFED:
-        l.append("serifed")
-    else:
-        l.append("sans")
-    if flags & pymupdf.TEXT_FONT_MONOSPACED:
-        l.append("monospaced")
-    if flags & pymupdf.TEXT_FONT_BOLD:
-        l.append("bold")
-
-    return ",".join(l)
-
-
-def escape_tsv(text: str) -> str:
-    """
-    めっちゃ雑だけど一応……
-    """
-    return (
-        text.replace("\\", "\\\\")
-        .replace("\t", "\\t")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n")
-    )
+        if want_annotation:
+            annotate_document(doc, spans, annotation_options, source_name=f.name)
+            logger.info(f"writing to {annotated_file}")
+            doc.save(annotated_file, garbage=3, deflate=True)
+            logger.info(f"successfully written to {annotated_file}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -133,11 +74,88 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="-v for INFO, -vv for DEBUG",
     )
+
+    annotation = parser.add_argument_group(
+        "annotation", f"draw the font info onto a copy of the PDF (*{ANNOTATED_SUFFIX})"
+    )
+    annotation.add_argument(
+        "--annotate",
+        "-a",
+        action="store_true",
+        help="also write an annotated copy of each PDF",
+    )
+    annotation.add_argument(
+        "--annotate-only",
+        "-A",
+        action="store_true",
+        help="write the annotated PDF and not the TSV",
+    )
+    annotation.add_argument(
+        "--labels",
+        action="store_true",
+        help="write font/size/colour by every span, not just the style class number",
+    )
+    annotation.add_argument(
+        "--label-every-span",
+        dest="dedupe_labels",
+        action="store_false",
+        help="caption every span; by default a run of spans in the same style "
+        "class is captioned once",
+    )
+    annotation.add_argument(
+        "--no-class-numbers",
+        dest="class_numbers",
+        action="store_false",
+        help="draw bare boxes, without the style class number",
+    )
+    annotation.add_argument(
+        "--no-legend",
+        dest="legend",
+        action="store_false",
+        help="do not append the legend page(s)",
+    )
+    annotation.add_argument(
+        "--label-size",
+        type=float,
+        default=5.0,
+        metavar="PT",
+        help="size of the class numbers / labels drawn by each box (default: 5)",
+    )
+    annotation.add_argument(
+        "--grid",
+        action="store_true",
+        help="overlay a coordinate grid, in the same coordinates as the TSV",
+    )
+    annotation.add_argument(
+        "--grid-step",
+        type=float,
+        default=50.0,
+        metavar="PT",
+        help="grid spacing in points (default: 50)",
+    )
+    annotation.add_argument(
+        "--colour-scheme",
+        "--color-scheme",
+        dest="colour_scheme",
+        choices=palette_names(),
+        default=DEFAULT_PALETTE,
+        help="palette for the style classes: 'distinct' generates as many "
+        "mutually distinguishable colours as the document needs "
+        f"(default: {DEFAULT_PALETTE})",
+    )
+    annotation.add_argument(
+        "--colours",
+        "--colors",
+        dest="colours",
+        metavar="HEX,HEX,...",
+        help="explicit palette, e.g. '#0072b2,#d55e00'; overrides --colour-scheme",
+    )
     return parser
 
 
 def main():
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
     # --verbose でログのレベル変更
     log_level = {
         0: logging.WARNING,
@@ -150,15 +168,31 @@ def main():
     )
     logging.getLogger(__package__).setLevel(log_level)
 
+    want_annotation = args.annotate or args.annotate_only
+    want_tsv = not args.annotate_only
+
+    try:
+        palette = parse_palette(args.colour_scheme, args.colours)
+    except ValueError as e:
+        parser.error(str(e))
+    if want_annotation and args.grid_step <= 0:
+        parser.error("--grid-step must be positive")
+
+    annotation_options = AnnotationOptions(
+        palette=palette,
+        labels=args.labels,
+        class_numbers=args.class_numbers,
+        grid=args.grid,
+        grid_step=args.grid_step,
+        legend=args.legend,
+        label_size=args.label_size,
+        dedupe_labels=args.dedupe_labels,
+    )
+
     for f in args.pdfs:
-        result_file = f.with_suffix(f.suffix + ".font-info.tsv")
-        if result_file.exists():  # ファイルがあったら上書きはやめておく
-            # todo: 大サービスで比較する？
-            logger.error(f"not overriding {result_file} in processing {f}: skipping")
-            continue
-        else:
-            tsv_data = generate_font_info(f)
-            logger.info(f"writing to {result_file}")
-            with result_file.open("w") as resultwriter:
-                resultwriter.write(tsv_data)
-            logger.info(f"successfully written to {result_file}")
+        process(
+            f,
+            want_tsv=want_tsv,
+            want_annotation=want_annotation,
+            annotation_options=annotation_options,
+        )

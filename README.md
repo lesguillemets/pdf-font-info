@@ -40,6 +40,20 @@ Use `-v` for informational logging and `-vv` for debug logging:
 uv run pdf-font-info -v file.pdf
 ```
 
+With `--annotate`, an annotated copy of the PDF is written alongside the TSV:
+
+```sh
+uv run pdf-font-info --annotate file.pdf
+```
+
+```text
+file.pdf
+file.pdf.font-info.tsv
+file.pdf.font-annotated.pdf
+```
+
+`--annotate-only` writes the annotated PDF and skips the TSV.
+
 ## Output
 
 The TSV contains the following columns:
@@ -73,6 +87,77 @@ superscript,sans
 Tabs, line breaks, carriage returns, and backslashes in extracted text are escaped so that each span occupies one physical TSV line.
 
 The bounding-box coordinates are those returned by PyMuPDF for each text span.
+
+## Annotated PDF
+
+`--annotate` draws the font information onto a copy of the document.
+
+Spans that share a `(font, size, colour, flags)` tuple form a *style class*.
+Each class is given a colour and a number; every span is boxed in its class
+colour and the number is written by the box, so a page can be read at a glance
+even where the text is dense. A legend listing the classes, most frequent
+first, is appended at the end of the document:
+
+```text
+[  1]  NimbusRoman-Regular    10.00pt  #000000  serifed          412 spans on 9 pages
+[  2]  NimbusRoman-Bold       14.00pt  #000000  serifed,bold       9 spans on 4 pages
+[  3]  NimbusMono-Regular      9.00pt  #444444  sans,monospaced   37 spans on 2 pages
+```
+
+A run of consecutive spans in the same class is captioned once, at its first
+span; `--label-every-span` captions all of them.
+
+The annotations are drawn as ordinary page content rather than as PDF
+annotation objects, so they survive printing and rasterising and look the same
+in every viewer. The input file is never modified.
+
+| flag | effect |
+| --- | --- |
+| `--annotate`, `-a` | also write `*.font-annotated.pdf` |
+| `--annotate-only`, `-A` | write the annotated PDF and not the TSV |
+| `--labels` | write font, size and colour by each box, not just the class number |
+| `--label-every-span` | caption every span rather than once per run |
+| `--no-class-numbers` | draw bare boxes |
+| `--no-legend` | do not append the legend page(s) |
+| `--label-size PT` | size of the captions (default: 5) |
+| `--grid` | overlay a coordinate grid |
+| `--grid-step PT` | grid spacing (default: 50) |
+| `--colour-scheme NAME` | `distinct` (default), `okabe-ito`, `bright` or `mono` |
+| `--colours HEX,HEX,...` | explicit palette, e.g. `'#0072b2,#d55e00'` |
+
+`--color-scheme` and `--colors` are accepted as aliases.
+
+The grid is drawn in the PDF coordinate system used elsewhere in the output:
+the origin is the top left of the page, `y` increases downwards, and the units
+are points, so the numbers along the edges can be read against the `x0`, `y0`,
+`x1` and `y1` columns of the TSV.
+
+### Colours
+
+A document worth inspecting usually has more style classes than any hand-picked
+palette has colours, so the default scheme, `distinct`, generates them: colours
+are chosen greedily in [OKLab](https://bottosson.github.io/posts/oklab/) so that
+each new one is as far as possible from every colour already chosen, and from
+the white of the paper and the black of the text.
+
+The selection is restricted to a band of lightness and a minimum chroma. A
+0.4pt hairline is not a swatch: pale and desaturated colours that look perfectly
+distinct as filled rectangles wash out entirely as a thin box on white, so those
+are excluded even though it costs some of the theoretical range.
+
+Because the choice is greedy, the sequence is prefix-stable — the first *k*
+colours are the same whether the document has *k* classes or fifty — so adding a
+class to a document does not renumber or recolour the rest.
+
+Colour alone runs out at around sixteen classes. Beyond that the colours repeat
+with a different dash pattern, giving colour × dash as the identifier; the
+legend shows both. Class numbers remain unique regardless.
+
+The alternatives are `okabe-ito`, the colour-vision-deficiency-safe qualitative
+palette minus the yellow that is hard to see on white — the better choice for a
+document with no more than seven classes, since no set of twenty-odd colours can
+be CVD-safe — `bright`, and `mono` for single-colour printing, which
+distinguishes classes by dash pattern and number alone.
 
 ## Licence
 
