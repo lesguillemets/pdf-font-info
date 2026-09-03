@@ -11,12 +11,18 @@ import unittest
 import pymupdf
 
 from pdf_font_info.annotate import (
-    PALETTES,
     AnnotationOptions,
     StyleKey,
     annotate_document,
     build_style_classes,
+)
+from pdf_font_info.palette import (
+    DASH_PATTERNS,
+    NAMED_PALETTES,
+    Palette,
+    distinct_colours,
     parse_palette,
+    srgb_to_oklab,
     to_rgb,
 )
 from pdf_font_info.spans import (
@@ -73,7 +79,7 @@ class TestStyleClasses(unittest.TestCase):
     def test_grouping_and_ordering(self):
         with make_doc() as doc:
             spans = extract_spans(doc)
-        classes = build_style_classes(spans, PALETTES["okabe-ito"])
+        classes = build_style_classes(spans, NAMED_PALETTES["okabe-ito"])
 
         self.assertEqual(len(classes), 3)
         by_index = sorted(classes.values(), key=lambda c: c.index)
@@ -82,7 +88,7 @@ class TestStyleClasses(unittest.TestCase):
         self.assertEqual(by_index[0].count, 2)
         self.assertEqual(by_index[0].key.font, "Times-Roman")
 
-    def test_colours_cycle_but_indices_do_not(self):
+    def test_colours_cycle_with_a_new_dash_but_indices_do_not(self):
         spans = [
             SpanInfo(
                 page=1,
@@ -99,11 +105,14 @@ class TestStyleClasses(unittest.TestCase):
             )
             for i in range(5)
         ]
-        classes = build_style_classes(spans, (0x000000, 0xFFFFFF))
+        classes = build_style_classes(spans, Palette("t", (0x000000, 0xFFFFFF)))
         indices = sorted(c.index for c in classes.values())
         self.assertEqual(indices, [1, 2, 3, 4, 5])
         by_index = sorted(classes.values(), key=lambda c: c.index)
+        # 2 色しかないので 3 番目で色は一周し、破線が変わって区別が付く
         self.assertEqual(by_index[0].rgb, by_index[2].rgb)
+        self.assertIsNone(by_index[0].dash)
+        self.assertEqual(by_index[2].dash, DASH_PATTERNS[1])
 
     def test_style_key_rounds_size(self):
         def span(size: float) -> SpanInfo:
@@ -126,10 +135,12 @@ class TestStyleClasses(unittest.TestCase):
 
 class TestPalette(unittest.TestCase):
     def test_named_scheme(self):
-        self.assertEqual(parse_palette("mono", None), PALETTES["mono"])
+        self.assertEqual(parse_palette("mono", None), NAMED_PALETTES["mono"])
 
     def test_explicit_colours_win(self):
-        self.assertEqual(parse_palette("mono", "#ff0000, 00ff00"), (0xFF0000, 0x00FF00))
+        self.assertEqual(
+            parse_palette("mono", "#ff0000, 00ff00").colours(2), (0xFF0000, 0x00FF00)
+        )
 
     def test_rejects_nonsense(self):
         for scheme, colours in [("nope", None), (None, "#zzzzzz"), (None, "#1000000")]:
@@ -138,6 +149,23 @@ class TestPalette(unittest.TestCase):
                 self.assertRaises(ValueError),
             ):
                 parse_palette(scheme, colours)
+
+    def test_generated_palette_is_prefix_stable(self):
+        # class が増えても、すでにある class の色は変わらない
+        self.assertEqual(distinct_colours(4), distinct_colours(12)[:4])
+
+    def test_generated_colours_are_distinct_and_legible(self):
+        colours = distinct_colours(16)
+        self.assertEqual(len(set(colours)), 16)
+        for c in colours:
+            lightness = srgb_to_oklab(c)[0]
+            # 白地でも本文の黒とも紛れない明度に収まっている
+            self.assertGreater(lightness, 0.25)
+            self.assertLess(lightness, 0.70)
+
+    def test_dashes_extend_the_palette(self):
+        assignments = NAMED_PALETTES["distinct"].assignments(40)
+        self.assertEqual(len(set(assignments)), 40)
 
     def test_to_rgb(self):
         self.assertEqual(to_rgb(0x000000), (0.0, 0.0, 0.0))
@@ -154,7 +182,7 @@ class TestAnnotation(unittest.TestCase):
             self.assertEqual(len(classes), 3)
             self.assertEqual(doc.page_count, 2)  # 凡例が 1 ページ増える
             self.assertGreaterEqual(len(doc[0].get_drawings()) - before, len(spans))
-            self.assertIn("style classes", doc[1].get_text())
+            self.assertIn("style classes", str(doc[1].get_text()))
 
     def test_no_legend(self):
         with make_doc() as doc:
@@ -164,16 +192,16 @@ class TestAnnotation(unittest.TestCase):
 
     def test_original_text_is_untouched(self):
         with make_doc() as doc:
-            before = doc[0].get_text()
+            before = str(doc[0].get_text())
             annotate_document(doc, extract_spans(doc), AnnotationOptions(), "t.pdf")
-            self.assertIn(before.strip(), doc[0].get_text())
+            self.assertIn(before.strip(), str(doc[0].get_text()))
 
     def test_empty_document(self):
         with pymupdf.open() as doc:
             doc.new_page()
             annotate_document(doc, [], AnnotationOptions(), "empty.pdf")
             self.assertEqual(doc.page_count, 2)
-            self.assertIn("no text spans found", doc[1].get_text())
+            self.assertIn("no text spans found", str(doc[1].get_text()))
 
     def test_grid_step_must_be_positive(self):
         with make_doc() as doc, self.assertRaises(ValueError):

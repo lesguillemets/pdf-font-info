@@ -4,13 +4,8 @@ from pathlib import Path
 
 import pymupdf
 
-from .annotate import (
-    DEFAULT_PALETTE,
-    PALETTES,
-    AnnotationOptions,
-    annotate_document,
-    parse_palette,
-)
+from .annotate import AnnotationOptions, annotate_document
+from .palette import DEFAULT_PALETTE, palette_names, parse_palette
 from .spans import extract_spans, gen_tsv
 
 logger = logging.getLogger(__name__)
@@ -142,9 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--colour-scheme",
         "--color-scheme",
         dest="colour_scheme",
-        choices=sorted(PALETTES),
+        choices=palette_names(),
         default=DEFAULT_PALETTE,
-        help=f"palette for the style classes (default: {DEFAULT_PALETTE})",
+        help="palette for the style classes: 'distinct' generates as many "
+        "mutually distinguishable colours as the document needs "
+        f"(default: {DEFAULT_PALETTE})",
     )
     annotation.add_argument(
         "--colours",

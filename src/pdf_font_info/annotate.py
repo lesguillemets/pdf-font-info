@@ -6,6 +6,8 @@ class ごとに色を割り当てて枠を描く。各枠には class 番号を�
 文書末尾に凡例のページを足す。密度の高いページでも枠が読めるようにするため、
 span ごとの詳細ラベルは ``--labels`` を指定したときだけ描く。
 
+色が足りなくなったら破線パターンを第二のチャンネルとして使う (:mod:`pdf_font_info.palette`)。
+
 注釈は本物の PDF annotation ではなく、ページ内容としてそのまま描画する
 (``draw_rect`` / ``insert_text``)。ビューアによらず同じ見た目になり、
 印刷や画像化でも消えない。元のファイルには手を触れず、常に別名で保存する。
@@ -17,55 +19,15 @@ from dataclasses import dataclass, field
 
 import pymupdf
 
+from .palette import DEFAULT_PALETTE, NAMED_PALETTES, RGB, Palette, to_rgb
 from .spans import SpanInfo
 
 logger = logging.getLogger(__name__)
-
-RGB = tuple[float, float, float]
-
-# 既定の palette は Okabe-Ito の色覚多様性に配慮した categorical palette から、
-# 白地に乗せると見えにくい黄 (#f0e442) を除いたもの。
-PALETTES: dict[str, tuple[int, ...]] = {
-    "okabe-ito": (
-        0x0072B2,  # blue
-        0xD55E00,  # vermillion
-        0x009E73,  # bluish green
-        0xCC79A7,  # reddish purple
-        0xE69F00,  # orange
-        0x56B4E9,  # sky blue
-        0x000000,  # black
-    ),
-    "bright": (
-        0xFF0000,
-        0x0000FF,
-        0x00A000,
-        0xFF00FF,
-        0xFF8000,
-        0x00A0A0,
-        0x8000FF,
-    ),
-    "mono": (
-        0x000000,
-        0x555555,
-        0x888888,
-        0xAAAAAA,
-    ),
-}
-DEFAULT_PALETTE = "okabe-ito"
 
 GRID_COLOR: RGB = (0.80, 0.80, 0.85)
 GRID_LABEL_COLOR: RGB = (0.45, 0.45, 0.55)
 LEGEND_TEXT_COLOR: RGB = (0.0, 0.0, 0.0)
 LEGEND_RULE_COLOR: RGB = (0.75, 0.75, 0.75)
-
-
-def to_rgb(color: int) -> RGB:
-    """0xRRGGBB を PyMuPDF の (r, g, b) 0.0-1.0 に。"""
-    return (
-        ((color >> 16) & 0xFF) / 255.0,
-        ((color >> 8) & 0xFF) / 255.0,
-        (color & 0xFF) / 255.0,
-    )
 
 
 def _plural(n: int, noun: str) -> str:
@@ -104,11 +66,12 @@ class StyleClass:
     count: int = 0
     pages: set[int] = field(default_factory=set)
     rgb: RGB = (0.0, 0.0, 0.0)
+    dash: str | None = None  # PyMuPDF の dashes 文字列、実線なら None
 
 
 @dataclass
 class AnnotationOptions:
-    palette: Sequence[int] = PALETTES[DEFAULT_PALETTE]
+    palette: Palette = NAMED_PALETTES[DEFAULT_PALETTE]
     labels: bool = False
     class_numbers: bool = True
     grid: bool = False
@@ -122,11 +85,11 @@ class AnnotationOptions:
 
 
 def build_style_classes(
-    spans: Iterable[SpanInfo], palette: Sequence[int]
+    spans: Iterable[SpanInfo], palette: Palette
 ) -> dict[StyleKey, StyleClass]:
     """
-    span を style class にまとめ、出現回数の多い順に番号と色を割り当てる。
-    色は palette を使い切ったら循環するので、同色でも番号で区別できるようにする。
+    span を style class にまとめ、出現回数の多い順に番号と (色, 破線) を割り当てる。
+    色を使い切ったら破線パターンが変わり、それも尽きたら循環する (class 番号は一意)。
     """
     classes: dict[StyleKey, StyleClass] = {}
     for order, span in enumerate(spans):
@@ -143,9 +106,12 @@ def build_style_classes(
     ordered = sorted(
         classes.values(), key=lambda c: (-c.count, first_seen[c.key], c.key.font)
     )
-    for i, cls in enumerate(ordered):
+    for i, (cls, (colour, dash)) in enumerate(
+        zip(ordered, palette.assignments(len(ordered)), strict=True)
+    ):
         cls.index = i + 1
-        cls.rgb = to_rgb(palette[i % len(palette)])
+        cls.rgb = to_rgb(colour)
+        cls.dash = dash
     return {cls.key: cls for cls in ordered}
 
 
@@ -211,6 +177,7 @@ def _draw_span(
         span.rect,
         color=cls.rgb,
         width=opts.box_width,
+        dashes=cls.dash,
         stroke_opacity=opts.box_opacity,
     )
     if not (with_caption and (opts.class_numbers or opts.labels)):
@@ -291,20 +258,28 @@ def draw_legend(
         for cls, name, style, count in chunk:
             if cls is not None:
                 page.draw_rect(
-                    pymupdf.Rect(margin, y - body_size + 1, margin + 10, y + 1),
+                    pymupdf.Rect(margin, y - body_size + 1, margin + 9, y + 1),
                     color=cls.rgb,
                     fill=cls.rgb,
                     width=0.4,
                 )
+                # 破線パターンも凡例に出す
+                page.draw_line(
+                    pymupdf.Point(margin + 13, y - body_size / 2 + 1),
+                    pymupdf.Point(margin + 33, y - body_size / 2 + 1),
+                    color=cls.rgb,
+                    dashes=cls.dash,
+                    width=0.8,
+                )
             page.insert_text(
-                pymupdf.Point(margin + 16, y),
+                pymupdf.Point(margin + 40, y),
                 _latin1_safe(name),
                 fontsize=body_size,
                 fontname="helv",
                 color=LEGEND_TEXT_COLOR,
             )
             page.insert_text(
-                pymupdf.Point(margin + 200, y),
+                pymupdf.Point(margin + 224, y),
                 _latin1_safe(style),
                 fontsize=body_size,
                 fontname="helv",
@@ -352,31 +327,3 @@ def annotate_document(
     if opts.legend:
         draw_legend(doc, list(classes.values()), opts, source_name)
     return classes
-
-
-def parse_palette(scheme: str | None, colours: str | None) -> tuple[int, ...]:
-    """
-    ``--colour-scheme`` と ``--colours`` から実際に使う色の列を決める。
-    ``--colours`` があればそちらが優先。
-    """
-    if colours:
-        parsed: list[int] = []
-        for raw in colours.split(","):
-            token = raw.strip().lstrip("#")
-            if not token:
-                continue
-            try:
-                value = int(token, 16)
-            except ValueError as e:
-                raise ValueError(f"not a hex colour: {raw!r}") from e
-            if not 0 <= value <= 0xFFFFFF:
-                raise ValueError(f"colour out of range: {raw!r}")
-            parsed.append(value)
-        if not parsed:
-            raise ValueError("no colours given")
-        return tuple(parsed)
-
-    name = scheme or DEFAULT_PALETTE
-    if name not in PALETTES:
-        raise ValueError(f"unknown colour scheme: {name!r}")
-    return PALETTES[name]

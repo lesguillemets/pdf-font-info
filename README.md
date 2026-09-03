@@ -122,7 +122,7 @@ in every viewer. The input file is never modified.
 | `--label-size PT` | size of the captions (default: 5) |
 | `--grid` | overlay a coordinate grid |
 | `--grid-step PT` | grid spacing (default: 50) |
-| `--colour-scheme NAME` | `okabe-ito` (default), `bright` or `mono` |
+| `--colour-scheme NAME` | `distinct` (default), `okabe-ito`, `bright` or `mono` |
 | `--colours HEX,HEX,...` | explicit palette, e.g. `'#0072b2,#d55e00'` |
 
 `--color-scheme` and `--colors` are accepted as aliases.
@@ -132,9 +132,32 @@ the origin is the top left of the page, `y` increases downwards, and the units
 are points, so the numbers along the edges can be read against the `x0`, `y0`,
 `x1` and `y1` columns of the TSV.
 
-The default palette is the Okabe-Ito qualitative palette, minus the yellow that
-is hard to see on white. Where a document has more style classes than the
-palette has colours the colours repeat; the class numbers stay unique.
+### Colours
+
+A document worth inspecting usually has more style classes than any hand-picked
+palette has colours, so the default scheme, `distinct`, generates them: colours
+are chosen greedily in [OKLab](https://bottosson.github.io/posts/oklab/) so that
+each new one is as far as possible from every colour already chosen, and from
+the white of the paper and the black of the text.
+
+The selection is restricted to a band of lightness and a minimum chroma. A
+0.4pt hairline is not a swatch: pale and desaturated colours that look perfectly
+distinct as filled rectangles wash out entirely as a thin box on white, so those
+are excluded even though it costs some of the theoretical range.
+
+Because the choice is greedy, the sequence is prefix-stable — the first *k*
+colours are the same whether the document has *k* classes or fifty — so adding a
+class to a document does not renumber or recolour the rest.
+
+Colour alone runs out at around sixteen classes. Beyond that the colours repeat
+with a different dash pattern, giving colour × dash as the identifier; the
+legend shows both. Class numbers remain unique regardless.
+
+The alternatives are `okabe-ito`, the colour-vision-deficiency-safe qualitative
+palette minus the yellow that is hard to see on white — the better choice for a
+document with no more than seven classes, since no set of twenty-odd colours can
+be CVD-safe — `bright`, and `mono` for single-colour printing, which
+distinguishes classes by dash pattern and number alone.
 
 ## Licence
 
